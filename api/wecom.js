@@ -13,8 +13,8 @@ export default async function handler(req, res) {
     // 简单解析文本内容（MVP）
     const content = xml.toString();
 
-    // 等待3秒
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // 等待100毫秒
+    await new Promise((resolve) => setTimeout(resolve, 100));
 
     // 返回固定消息
     const reply = `
