@@ -4,13 +4,13 @@ const require = createRequire(import.meta.url);
 const wecomCrypto = require("@wecom/crypto");
 
 // 获取企业微信配置
-const TOKEN = process.env.WECOM_TOKEN;
-const ENCODING_AES_KEY = process.env.WECOM_ENCODING_AES_KEY;
-const CORP_ID = process.env.WECOM_CORP_ID;
+const TOKEN = process.env.NEXT_PUBLIC_WECOM_TOKEN;
+const ENCODING_AES_KEY = process.env.NEXT_PUBLIC_WECOM_ENCODING_AES_KEY;
+const CORP_ID = process.env.NEXT_PUBLIC_WECOM_CORP_ID;
 
 if (!TOKEN || !ENCODING_AES_KEY) {
   throw new Error(
-    "Missing required environment variables: WECOM_TOKEN or WECOM_ENCODING_AES_KEY",
+    "Missing required environment variables: NEXT_PUBLIC_WECOM_TOKEN or NEXT_PUBLIC_WECOM_ENCODING_AES_KEY",
   );
 }
 

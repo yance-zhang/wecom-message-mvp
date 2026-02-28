@@ -61,13 +61,13 @@ export default function Home() {
         <p>确保已配置以下环境变量（在 .env.local 中）：</p>
         <ul>
           <li>
-            <code>WECOM_TOKEN</code>
+            <code>NEXT_PUBLIC_WECOM_TOKEN</code>
           </li>
           <li>
-            <code>WECOM_ENCODING_AES_KEY</code>
+            <code>NEXT_PUBLIC_WECOM_ENCODING_AES_KEY</code>
           </li>
           <li>
-            <code>WECOM_CORP_ID</code>
+            <code>NEXT_PUBLIC_WECOM_CORP_ID</code>
           </li>
         </ul>
         <p>

@@ -33,9 +33,9 @@ cp .env.local.example .env.local
 编辑 `.env.local`：
 
 ```
-WECOM_TOKEN=your_token_here
-WECOM_ENCODING_AES_KEY=your_aes_key_here
-WECOM_CORP_ID=your_corp_id_here
+NEXT_PUBLIC_WECOM_TOKEN=your_token_here
+NEXT_PUBLIC_WECOM_ENCODING_AES_KEY=your_aes_key_here
+NEXT_PUBLIC_WECOM_CORP_ID=your_corp_id_here
 ```
 
 这些值在企业微信应用详情页获取。
