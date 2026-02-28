@@ -1,5 +1,4 @@
 import crypto from "crypto";
-import { getRawBody } from "raw-body";
 
 // 获取企业微信配置
 const TOKEN = process.env.WECOM_TOKEN;
