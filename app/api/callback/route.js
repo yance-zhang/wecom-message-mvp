@@ -20,6 +20,17 @@ function calculateSignature(token, timestamp, nonce, echostr) {
 }
 
 /**
+ * 去除PKCS7填充
+ */
+function removePkcs7Padding(buffer) {
+  const pad = buffer[buffer.length - 1];
+  if (pad < 1 || pad > 32) {
+    return buffer;
+  }
+  return buffer.slice(0, buffer.length - pad);
+}
+
+/**
  * 对消息进行AES解密
  */
 function decryptMessage(encryptedMsg, encodingAesKey) {
@@ -28,16 +39,22 @@ function decryptMessage(encryptedMsg, encodingAesKey) {
     const iv = key.slice(0, 16);
 
     const encrypted = Buffer.from(encryptedMsg, "base64");
-    const decipher = crypto.createDecipheriv("aes-128-cbc", key, iv);
+    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
+    decipher.setAutoPadding(false);
 
-    let decrypted = decipher.update(encrypted, "binary", "utf8");
-    decrypted += decipher.final("utf8");
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]);
+    const content = removePkcs7Padding(decrypted);
 
-    // 移除填充的字节
-    const content = decrypted.slice(16);
-    const len = Buffer.from(content.slice(-4), "binary").readUInt32BE(0);
+    const msgLength = content.slice(16, 20).readUInt32BE(0);
+    const msgStart = 20;
+    const msgEnd = msgStart + msgLength;
+    const message = content.slice(msgStart, msgEnd).toString("utf8");
+    const receiveId = content.slice(msgEnd).toString("utf8");
 
-    return content.slice(0, len);
+    return { message, receiveId };
   } catch (error) {
     console.error("Decryption error:", error);
     throw new Error("Failed to decrypt message");
@@ -56,32 +73,38 @@ function encryptMessage(msg, encodingAesKey) {
     const randomStr = crypto.randomBytes(8).toString("hex");
 
     // 构建待加密内容：randomStr(16bytes) + msgLen(4bytes) + msg + corpId
+    const msgBuffer = Buffer.from(msg, "utf8");
     const msgLen = Buffer.alloc(4);
-    msgLen.writeUInt32BE(msg.length);
+    msgLen.writeUInt32BE(msgBuffer.length);
 
     const content = Buffer.concat([
       Buffer.from(randomStr, "utf8"),
       msgLen,
-      Buffer.from(msg, "utf8"),
+      msgBuffer,
       Buffer.from(CORP_ID || "", "utf8"),
     ]);
 
     // PKCS7填充
-    const blockSize = 16;
-    const paddingLen = blockSize - (content.length % blockSize);
+    const blockSize = 32;
+    const paddingLen = blockSize - (content.length % blockSize || blockSize);
     const padding = Buffer.alloc(paddingLen, paddingLen);
     const padded = Buffer.concat([content, padding]);
 
     // 加密
-    const cipher = crypto.createCipheriv("aes-128-cbc", key, iv);
-    let encrypted = cipher.update(padded, "binary", "base64");
-    encrypted += cipher.final("base64");
+    const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
+    cipher.setAutoPadding(false);
+    const encrypted = Buffer.concat([cipher.update(padded), cipher.final()]);
 
-    return encrypted;
+    return encrypted.toString("base64");
   } catch (error) {
     console.error("Encryption error:", error);
     throw new Error("Failed to encrypt message");
   }
+}
+
+function extractEncryptFromXml(xml) {
+  const match = xml.match(/<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/s);
+  return match?.[1] || null;
 }
 
 /**
@@ -108,10 +131,15 @@ export async function GET(request) {
     }
 
     // 解密echostr
-    const decrypted = decryptMessage(echostr, ENCODING_AES_KEY);
+    const { message: decrypted } = decryptMessage(echostr, ENCODING_AES_KEY);
 
     console.info("Callback URL verified successfully");
-    return new Response(decrypted);
+    return new Response(decrypted, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+    });
   } catch (error) {
     console.error("GET error:", error);
     return new Response("Verification failed", { status: 500 });
@@ -132,60 +160,42 @@ export async function POST(request) {
       return new Response("Missing parameters", { status: 400 });
     }
 
-    // 获取请求体
     const body = await request.text();
 
-    // 验证签名
-    const signature = calculateSignature(TOKEN, timestamp, nonce, body);
+    const encryptedMsg = extractEncryptFromXml(body);
+    if (!encryptedMsg) {
+      console.error("No encrypted content found");
+      return new Response("Invalid message format", { status: 400 });
+    }
+
+    // 企业微信POST签名校验使用加密字段Encrypt
+    const signature = calculateSignature(TOKEN, timestamp, nonce, encryptedMsg);
 
     if (signature !== msgSignature) {
       console.error("Signature verification failed for POST");
       return new Response("Invalid signature", { status: 403 });
     }
 
-    // 解析XML并提取加密内容
-    const encryptedMatchResult = body.match(
-      /<Encrypt><!\[CDATA\[(.*?)\]\]><\/Encrypt>/,
+    const { message: decrypted, receiveId } = decryptMessage(
+      encryptedMsg,
+      ENCODING_AES_KEY,
     );
-    if (!encryptedMatchResult) {
-      console.error("No encrypted content found");
-      return new Response("Invalid message format", { status: 400 });
-    }
 
-    const encryptedMsg = encryptedMatchResult[1];
-    const decrypted = decryptMessage(encryptedMsg, ENCODING_AES_KEY);
+    if (CORP_ID && receiveId !== CORP_ID) {
+      console.error("ReceiveId mismatch:", receiveId);
+      return new Response("Invalid corp id", { status: 403 });
+    }
 
     console.info("Message received and decrypted:", decrypted);
 
     // 这里可以处理消息逻辑，例如调用AI、保存数据库等
     // TODO: Add your message processing logic here
 
-    // 构建回复消息
-    const replyMsg = `收到消息: ${decrypted}`;
-    const encrypted = encryptMessage(replyMsg, ENCODING_AES_KEY);
-
-    // 计算回复的签名
-    const replySignature = calculateSignature(
-      TOKEN,
-      timestamp,
-      nonce,
-      encrypted,
-    );
-
-    // 返回加密的XML响应
-    const xmlResponse = `
-      <xml>
-        <Encrypt><![CDATA[${encrypted}]]></Encrypt>
-        <MsgSignature><![CDATA[${replySignature}]]></MsgSignature>
-        <TimeStamp>${timestamp}</TimeStamp>
-        <Nonce><![CDATA[${nonce}]]></Nonce>
-      </xml>
-    `.trim();
-
-    return new Response(xmlResponse, {
+    // 回调场景下可直接回 success，避免因回复加密格式导致企业微信判未响应
+    return new Response("success", {
       status: 200,
       headers: {
-        "Content-Type": "application/xml; charset=utf-8",
+        "Content-Type": "text/plain; charset=utf-8",
       },
     });
   } catch (error) {
