@@ -33,8 +33,7 @@ function extractEncryptFromXml(xml) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const msgSignature =
-      searchParams.get("msg_signature") || searchParams.get("signature");
+    const msgSignature = searchParams.get("msg_signature");
     const timestamp = searchParams.get("timestamp");
     const nonce = searchParams.get("nonce");
     const echostr = searchParams.get("echostr");
@@ -44,6 +43,7 @@ export async function GET(request) {
     }
 
     const signature = calculateSignature(TOKEN, timestamp, nonce, echostr);
+    console.log("signature", signature);
 
     if (signature !== msgSignature) {
       console.error("Signature verification failed", {
@@ -54,11 +54,12 @@ export async function GET(request) {
       return new Response("Invalid signature", { status: 403 });
     }
 
-    // 解密echostr
-    const { message: decrypted } = decryptMessage(echostr, ENCODING_AES_KEY);
+    console.info("签名验证成功");
+    const { message } = decryptMessage(echostr, ENCODING_AES_KEY);
+    console.log("message", message);
 
     console.info("Callback URL verified successfully");
-    return new Response(decrypted, {
+    return new Response(message, {
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
