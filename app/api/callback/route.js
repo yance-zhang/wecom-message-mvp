@@ -106,10 +106,10 @@ export async function POST(request) {
       ENCODING_AES_KEY,
     );
 
-    if (CORP_ID && id && id !== CORP_ID) {
-      console.error("ReceiveId mismatch:", id);
-      return new Response("Invalid corp id", { status: 403 });
-    }
+    // if (CORP_ID && id && id !== CORP_ID) {
+    //   console.error("ReceiveId mismatch:", id);
+    //   return new Response("Invalid corp id", { status: 403 });
+    // }
 
     console.info("Message received and decrypted:", decrypted);
 
