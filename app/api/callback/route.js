@@ -1,4 +1,7 @@
-import crypto from "crypto";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const wecomCrypto = require("@wecom/crypto");
 
 // 获取企业微信配置
 const TOKEN = process.env.WECOM_TOKEN;
@@ -11,95 +14,12 @@ if (!TOKEN || !ENCODING_AES_KEY) {
   );
 }
 
-/**
- * 计算签名
- */
-function calculateSignature(token, timestamp, nonce, echostr) {
-  const str = [token, timestamp, nonce, echostr].sort().join("");
-  return crypto.createHash("sha1").update(str).digest("hex");
+function calculateSignature(token, timestamp, nonce, value) {
+  return wecomCrypto.getSignature(token, timestamp, nonce, value);
 }
 
-/**
- * 去除PKCS7填充
- */
-function removePkcs7Padding(buffer) {
-  const pad = buffer[buffer.length - 1];
-  if (pad < 1 || pad > 32) {
-    return buffer;
-  }
-  return buffer.slice(0, buffer.length - pad);
-}
-
-/**
- * 对消息进行AES解密
- */
 function decryptMessage(encryptedMsg, encodingAesKey) {
-  try {
-    const key = Buffer.from(encodingAesKey + "=", "base64");
-    const iv = key.slice(0, 16);
-
-    const encrypted = Buffer.from(encryptedMsg, "base64");
-    const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
-    decipher.setAutoPadding(false);
-
-    const decrypted = Buffer.concat([
-      decipher.update(encrypted),
-      decipher.final(),
-    ]);
-    const content = removePkcs7Padding(decrypted);
-
-    const msgLength = content.slice(16, 20).readUInt32BE(0);
-    const msgStart = 20;
-    const msgEnd = msgStart + msgLength;
-    const message = content.slice(msgStart, msgEnd).toString("utf8");
-    const receiveId = content.slice(msgEnd).toString("utf8");
-
-    return { message, receiveId };
-  } catch (error) {
-    console.error("Decryption error:", error);
-    throw new Error("Failed to decrypt message");
-  }
-}
-
-/**
- * 对消息进行AES加密
- */
-function encryptMessage(msg, encodingAesKey) {
-  try {
-    const key = Buffer.from(encodingAesKey + "=", "base64");
-    const iv = key.slice(0, 16);
-
-    // 生成随机字符串
-    const randomStr = crypto.randomBytes(8).toString("hex");
-
-    // 构建待加密内容：randomStr(16bytes) + msgLen(4bytes) + msg + corpId
-    const msgBuffer = Buffer.from(msg, "utf8");
-    const msgLen = Buffer.alloc(4);
-    msgLen.writeUInt32BE(msgBuffer.length);
-
-    const content = Buffer.concat([
-      Buffer.from(randomStr, "utf8"),
-      msgLen,
-      msgBuffer,
-      Buffer.from(CORP_ID || "", "utf8"),
-    ]);
-
-    // PKCS7填充
-    const blockSize = 32;
-    const paddingLen = blockSize - (content.length % blockSize || blockSize);
-    const padding = Buffer.alloc(paddingLen, paddingLen);
-    const padded = Buffer.concat([content, padding]);
-
-    // 加密
-    const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
-    cipher.setAutoPadding(false);
-    const encrypted = Buffer.concat([cipher.update(padded), cipher.final()]);
-
-    return encrypted.toString("base64");
-  } catch (error) {
-    console.error("Encryption error:", error);
-    throw new Error("Failed to encrypt message");
-  }
+  return wecomCrypto.decrypt(encodingAesKey, encryptedMsg);
 }
 
 function extractEncryptFromXml(xml) {
@@ -113,7 +33,8 @@ function extractEncryptFromXml(xml) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const msgSignature = searchParams.get("msg_signature");
+    const msgSignature =
+      searchParams.get("msg_signature") || searchParams.get("signature");
     const timestamp = searchParams.get("timestamp");
     const nonce = searchParams.get("nonce");
     const echostr = searchParams.get("echostr");
@@ -122,11 +43,14 @@ export async function GET(request) {
       return new Response("Missing parameters", { status: 400 });
     }
 
-    // 验证签名
     const signature = calculateSignature(TOKEN, timestamp, nonce, echostr);
 
     if (signature !== msgSignature) {
-      console.error("Signature verification failed");
+      console.error("Signature verification failed", {
+        timestamp,
+        nonce,
+        msgSignature,
+      });
       return new Response("Invalid signature", { status: 403 });
     }
 
@@ -152,7 +76,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const { searchParams } = new URL(request.url);
-    const msgSignature = searchParams.get("msg_signature");
+    const msgSignature =
+      searchParams.get("msg_signature") || searchParams.get("signature");
     const timestamp = searchParams.get("timestamp");
     const nonce = searchParams.get("nonce");
 
@@ -168,7 +93,6 @@ export async function POST(request) {
       return new Response("Invalid message format", { status: 400 });
     }
 
-    // 企业微信POST签名校验使用加密字段Encrypt
     const signature = calculateSignature(TOKEN, timestamp, nonce, encryptedMsg);
 
     if (signature !== msgSignature) {
@@ -176,13 +100,13 @@ export async function POST(request) {
       return new Response("Invalid signature", { status: 403 });
     }
 
-    const { message: decrypted, receiveId } = decryptMessage(
+    const { message: decrypted, id } = decryptMessage(
       encryptedMsg,
       ENCODING_AES_KEY,
     );
 
-    if (CORP_ID && receiveId !== CORP_ID) {
-      console.error("ReceiveId mismatch:", receiveId);
+    if (CORP_ID && id && id !== CORP_ID) {
+      console.error("ReceiveId mismatch:", id);
       return new Response("Invalid corp id", { status: 403 });
     }
 
